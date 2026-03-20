@@ -47,17 +47,20 @@ jobs:
             _build
           key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
 
+      - name: Fetch deps
+        run: mix deps.get --only prod
+
       - name: Build Linux
-        run: ./build.sh linux
+        run: BURRITO_TARGET=linux mix release beacon --overwrite
 
       - name: Build macOS ARM
-        run: ./build.sh macos_arm && cp burrito_out/beacon_macos burrito_out/beacon_macos_arm
+        run: BURRITO_TARGET=macos_arm mix release beacon --overwrite
 
       - name: Build macOS Intel
-        run: ./build.sh macos_intel && cp burrito_out/beacon_macos burrito_out/beacon_macos_intel
+        run: BURRITO_TARGET=macos_intel mix release beacon --overwrite
 
       - name: Build Windows
-        run: ./build.sh windows
+        run: BURRITO_TARGET=windows mix release beacon --overwrite
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
