@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27'
+          elixir-version: '1.17'
+
+      - name: Cache Mix deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+
+      - name: Build Linux
+        run: ./build.sh linux
+        env:
+          MIX_ENV: prod
+
+      - name: Build macOS ARM
+        run: ./build.sh macos_arm && cp burrito_out/beacon_macos burrito_out/beacon_macos_arm
+        env:
+          MIX_ENV: prod
+
+      - name: Build macOS Intel
+        run: ./build.sh macos_intel && cp burrito_out/beacon_macos burrito_out/beacon_macos_intel
+        env:
+          MIX_ENV: prod
+
+      - name: Build Windows
+        run: ./build.sh windows
+        env:
+          MIX_ENV: prod
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            burrito_out/beacon_linux
+            burrito_out/beacon_macos_arm
+            burrito_out/beacon_macos_intel
+            burrito_out/beacon_windows.exe
