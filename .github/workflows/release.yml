@@ -11,7 +11,7 @@ on:
 
 env:
   MIX_ENV: prod
-  ZIG_VERSION: "0.13.0"
+  ZIG_VERSION: "0.15.2"
 
 jobs:
   release:
