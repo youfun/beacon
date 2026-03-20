@@ -20,5 +20,8 @@ erl_crash.dump
 *.ez
 
 # Ignore package tarball (built via "mix hex.build").
-watcher-*.tar
+beacon-*.tar
+
+# Compiled binaries
+/burrito_out/
 
