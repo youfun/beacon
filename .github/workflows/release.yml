@@ -1,15 +1,21 @@
 name: Release
 
+# GITHUB_TOKEN 默认只读，发布 Release 需要写权限
+permissions:
+  contents: write
+
 on:
   push:
     tags:
       - 'v*'
 
+env:
+  MIX_ENV: prod
+  ZIG_VERSION: "0.13.0"
+
 jobs:
   release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +25,24 @@ jobs:
         with:
           otp-version: '27'
           elixir-version: '1.17'
+
+      - name: Install Zig
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xz-utils jq wget
+          index="$(curl -fsSL https://ziglang.org/download/index.json)"
+          zig_url="$(printf '%s' "$index" | jq -r ".\"${ZIG_VERSION}\".\"x86_64-linux\".tarball")"
+          zig_pkg="$(basename "$zig_url")"
+          wget -q "$zig_url"
+          tar -xf "$zig_pkg"
+          sudo mv "${zig_pkg%.tar.xz}" /usr/local/zig
+          sudo ln -sf /usr/local/zig/zig /usr/local/bin/zig
+          zig version
+
+      - name: Install Hex and Rebar
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
 
       - name: Cache Mix deps
         uses: actions/cache@v4
@@ -30,27 +54,20 @@ jobs:
 
       - name: Build Linux
         run: ./build.sh linux
-        env:
-          MIX_ENV: prod
 
       - name: Build macOS ARM
         run: ./build.sh macos_arm && cp burrito_out/beacon_macos burrito_out/beacon_macos_arm
-        env:
-          MIX_ENV: prod
 
       - name: Build macOS Intel
         run: ./build.sh macos_intel && cp burrito_out/beacon_macos burrito_out/beacon_macos_intel
-        env:
-          MIX_ENV: prod
 
       - name: Build Windows
         run: ./build.sh windows
-        env:
-          MIX_ENV: prod
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           generate_release_notes: true
           files: |
             burrito_out/beacon_linux
