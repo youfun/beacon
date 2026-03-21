@@ -5,7 +5,7 @@ defmodule Beacon.StoreTest do
     # Restart store for each test
     case Process.whereis(Beacon.Store) do
       nil -> {:ok, _} = Beacon.Store.start_link([])
-      pid -> Agent.update(pid, fn _ -> %{plans: %{}, tasks: %{}, codex_sessions: %{}} end)
+      pid -> Agent.update(pid, fn _ -> %{plans: %{}, tasks: %{}, codex_sessions: %{}, skills: %{}} end)
     end
 
     :ok
@@ -31,6 +31,17 @@ defmodule Beacon.StoreTest do
     list = Beacon.Store.list(:plans)
     assert length(list) == 2
     assert hd(list).title == "New"
+  end
+
+  test "list handles legacy tuple mtimes" do
+    old = {{2024, 1, 1}, {0, 0, 0}}
+    new = ~U[2024-06-01 00:00:00Z]
+
+    Beacon.Store.put(:skills, "old", %{name: "Old", mtime: old})
+    Beacon.Store.put(:skills, "new", %{name: "New", mtime: new})
+
+    list = Beacon.Store.list(:skills)
+    assert Enum.map(list, & &1.name) == ["New", "Old"]
   end
 
   test "delete removes entry" do

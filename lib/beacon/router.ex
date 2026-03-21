@@ -30,6 +30,71 @@ defmodule Beacon.Router do
     end
   end
 
+  get "/config" do
+    config = Beacon.ConfigStore.get()
+    skills = Beacon.Store.list(:skills)
+    send_resp(conn, 200, Beacon.Views.config_page(config, skills))
+  end
+
+  get "/skill" do
+    conn = Plug.Conn.fetch_query_params(conn)
+    name = conn.params["name"]
+
+    case name && Beacon.Store.get(:skills, name) do
+      nil -> send_resp(conn, 404, Beacon.Views.not_found())
+      skill -> send_resp(conn, 200, Beacon.Views.skill_detail(name, skill))
+    end
+  end
+
+  get "/skill/*name_parts" do
+    name = Enum.join(name_parts, "/")
+
+    case name && Beacon.Store.get(:skills, name) do
+      nil -> send_resp(conn, 404, Beacon.Views.not_found())
+      skill -> send_resp(conn, 200, Beacon.Views.skill_detail(name, skill))
+    end
+  end
+
+  post "/api/config/skill_dirs" do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    
+    case :json.decode(body) do
+      {:ok, %{"path" => path}} ->
+        case Beacon.ConfigStore.add_skill_dir(path) do
+          {:ok, _config} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(200, :json.encode(%{"success" => true}) |> IO.iodata_to_binary())
+          {:error, reason} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(400, :json.encode(%{"error" => to_string(reason)}) |> IO.iodata_to_binary())
+        end
+      _ ->
+        send_resp(conn, 400, "Invalid JSON")
+    end
+  end
+
+  delete "/api/config/skill_dirs" do
+    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    
+    case :json.decode(body) do
+      {:ok, %{"path" => path}} ->
+        case Beacon.ConfigStore.remove_skill_dir(path) do
+          {:ok, _config} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(200, :json.encode(%{"success" => true}) |> IO.iodata_to_binary())
+          {:error, reason} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(400, :json.encode(%{"error" => to_string(reason)}) |> IO.iodata_to_binary())
+        end
+      _ ->
+        send_resp(conn, 400, "Invalid JSON")
+    end
+  end
+
   get "/api/data" do
     data = Beacon.Store.all()
 
@@ -44,12 +109,41 @@ defmodule Beacon.Router do
     |> send_resp(200, json)
   end
 
-  get "/api/raw/:source/:key" do
+  get "/api/raw/:source" do
+    conn = Plug.Conn.fetch_query_params(conn)
+    key = conn.params["key"]
+
     source_atom =
       case source do
         "plans" -> :plans
         "tasks" -> :tasks
         "codex_sessions" -> :codex_sessions
+        "skills" -> :skills
+        _ -> nil
+      end
+
+    case source_atom && key && Beacon.Store.get(source_atom, key) do
+      nil ->
+        send_resp(conn, 404, "not found")
+
+      data ->
+        raw = Map.get(data, :raw, inspect(data))
+
+        conn
+        |> put_resp_content_type("text/plain")
+        |> send_resp(200, raw)
+    end
+  end
+
+  get "/api/raw/:source/*key_parts" do
+    key = Enum.join(key_parts, "/")
+
+    source_atom =
+      case source do
+        "plans" -> :plans
+        "tasks" -> :tasks
+        "codex_sessions" -> :codex_sessions
+        "skills" -> :skills
         _ -> nil
       end
 

@@ -30,11 +30,25 @@ defmodule Beacon.Application do
 
     children = [
       Beacon.Store,
+      Beacon.ConfigStore,
       {Beacon.FileWatcher, sources: sources},
-      {Bandit, plug: Beacon.Router, port: port}
+      {Bandit, plug: Beacon.Router, port: port},
+      {Task, fn -> init_skill_sources() end}
     ]
 
     opts = [strategy: :one_for_one, name: Beacon.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp init_skill_sources do
+    Process.sleep(100)  # Wait for ConfigStore to initialize
+    config = Beacon.ConfigStore.get()
+    skill_dirs = Map.get(config, "skill_dirs", [])
+    
+    Enum.each(skill_dirs, fn dir ->
+      if File.dir?(dir) do
+        Beacon.FileWatcher.add_source(Beacon.Sources.Skills, dir)
+      end
+    end)
   end
 end

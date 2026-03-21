@@ -6,6 +6,14 @@ defmodule Beacon.FileWatcher do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  def add_source(mod, dir) do
+    GenServer.cast(__MODULE__, {:add_source, mod, dir})
+  end
+
+  def remove_source(mod, dir) do
+    GenServer.cast(__MODULE__, {:remove_source, mod, dir})
+  end
+
   @impl true
   def init(opts) do
     sources = Keyword.get(opts, :sources, Application.get_env(:beacon, :sources, []))
@@ -34,6 +42,25 @@ defmodule Beacon.FileWatcher do
     end
 
     {:ok, %{sources: sources, watcher_pid: watcher_pid}}
+  end
+
+  @impl true
+  def handle_cast({:add_source, mod, dir}, state) do
+    if File.dir?(dir) do
+      new_sources = [{mod, dir} | state.sources] |> Enum.uniq()
+      scan_dir(mod, dir)
+      new_state = restart_watcher(new_sources, state.watcher_pid)
+      {:noreply, new_state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_cast({:remove_source, mod, dir}, state) do
+    new_sources = Enum.reject(state.sources, fn {m, d} -> m == mod and d == dir end)
+    new_state = restart_watcher(new_sources, state.watcher_pid)
+    {:noreply, new_state}
   end
 
   @impl true
@@ -108,5 +135,29 @@ defmodule Beacon.FileWatcher do
   rescue
     e ->
       Logger.warning("Failed to parse #{path}: #{inspect(e)}")
+  end
+
+  defp restart_watcher(sources, old_pid) do
+    if old_pid do
+      Process.exit(old_pid, :normal)
+    end
+
+    dirs =
+      sources
+      |> Enum.map(fn {_mod, dir} -> dir end)
+      |> Enum.uniq()
+      |> Enum.filter(&File.dir?/1)
+
+    watcher_pid =
+      case dirs do
+        [] ->
+          nil
+        dirs ->
+          {:ok, pid} = FileSystem.start_link(dirs: dirs)
+          FileSystem.subscribe(pid)
+          pid
+      end
+
+    %{sources: sources, watcher_pid: watcher_pid}
   end
 end

@@ -1,14 +1,17 @@
 defmodule Beacon.Views do
   def index(data) do
-    plans = data |> Map.get(:plans, %{}) |> Enum.sort_by(fn {_, v} -> v.mtime end, {:desc, DateTime})
+    plans = data |> Map.get(:plans, %{}) |> Enum.sort_by(fn {_, v} -> normalize_mtime(v.mtime) end, {:desc, DateTime})
     tasks = data |> Map.get(:tasks, %{}) |> Enum.sort_by(fn {k, _} -> k end)
-    sessions = data |> Map.get(:codex_sessions, %{}) |> Enum.sort_by(fn {_, v} -> v.mtime end, {:desc, DateTime})
+    sessions = data |> Map.get(:codex_sessions, %{}) |> Enum.sort_by(fn {_, v} -> normalize_mtime(v.mtime) end, {:desc, DateTime})
+    skills = data |> Map.get(:skills, %{}) |> Enum.sort_by(fn {_, v} -> normalize_mtime(v.mtime) end, {:desc, DateTime})
 
     layout("Agent Dashboard", """
     <div class="tabs">
       <button class="tab active" onclick="showTab('plans')">Plans (#{length(plans)})</button>
       <button class="tab" onclick="showTab('tasks')">Tasks (#{length(tasks)})</button>
       <button class="tab" onclick="showTab('codex')">Codex (#{length(sessions)})</button>
+      <button class="tab" onclick="showTab('skills')">Skills (#{length(skills)})</button>
+      <a href="/config" class="tab" style="display:inline-flex;align-items:center;">⚙️ Config</a>
     </div>
 
     <div id="tab-plans" class="tab-content active">
@@ -19,6 +22,9 @@ defmodule Beacon.Views do
     </div>
     <div id="tab-codex" class="tab-content">
       #{render_codex_list(sessions)}
+    </div>
+    <div id="tab-skills" class="tab-content">
+      #{render_skills_list(skills)}
     </div>
     """)
   end
@@ -87,6 +93,130 @@ defmodule Beacon.Views do
 
   def not_found do
     layout("404 Not Found", "<div class='error'><h1>404 Not Found</h1><a href='/'>← Back</a></div>")
+  end
+
+  def config_page(config, skills) do
+    skill_dirs = Map.get(config, "skill_dirs", [])
+    
+    dir_rows = Enum.map(skill_dirs, fn dir ->
+      """
+      <tr>
+        <td><code>#{escape(dir)}</code></td>
+        <td><button onclick="removeDir('#{escape(dir)}')" class="btn-icon" style="color:var(--danger);">🗑️</button></td>
+      </tr>
+      """
+    end) |> Enum.join("\n")
+
+    layout("Configuration", """
+    <div class="detail-header">
+      <a href="/" class="back">&larr; Back</a>
+      <h1>Configuration</h1>
+    </div>
+
+    <div class="config-section">
+      <h3>Skill Directories</h3>
+      <p style="color:var(--text-soft);margin-bottom:1rem;font-size:.82rem;">
+        Add directories to monitor for SKILL.md files. Changes are saved to ~/.beacon/config.json
+      </p>
+
+      <table class="data-table">
+        <thead>
+          <tr><th>Path</th><th></th></tr>
+        </thead>
+        <tbody>
+          #{if dir_rows == "", do: "<tr><td colspan='2' class='empty'>No directories configured</td></tr>", else: dir_rows}
+        </tbody>
+      </table>
+
+      <div style="margin-top:1rem;display:flex;gap:.5rem;align-items:center;">
+        <input type="text" id="new-dir" placeholder="/path/to/skills" 
+               style="flex:1;padding:.5rem;border:1px solid var(--border);border-radius:var(--r-sm);font-family:var(--font-mono);font-size:.82rem;background:var(--surface);">
+        <button onclick="addDir()" class="btn-copy">Add Directory</button>
+      </div>
+      <div id="status" style="margin-top:.5rem;font-size:.78rem;"></div>
+    </div>
+
+    <div class="config-section" style="margin-top:2rem;">
+      <h3>Current Skills (#{length(skills)})</h3>
+      #{render_skills_list(skills)}
+    </div>
+
+    <script>
+      async function addDir() {
+        const input = document.getElementById('new-dir');
+        const path = input.value.trim();
+        if (!path) return;
+
+        try {
+          const r = await fetch('/api/config/skill_dirs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path})
+          });
+          const data = await r.json();
+          if (r.ok) {
+            showStatus('✓ Added successfully', 'var(--success)');
+            setTimeout(() => location.reload(), 1000);
+          } else {
+            showStatus('✗ ' + (data.error || 'Failed'), 'var(--danger)');
+          }
+        } catch(e) {
+          showStatus('✗ ' + e.message, 'var(--danger)');
+        }
+      }
+
+      async function removeDir(path) {
+        if (!confirm('Remove directory: ' + path + '?')) return;
+
+        try {
+          const r = await fetch('/api/config/skill_dirs', {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path})
+          });
+          const data = await r.json();
+          if (r.ok) {
+            showStatus('✓ Removed successfully', 'var(--success)');
+            setTimeout(() => location.reload(), 1000);
+          } else {
+            showStatus('✗ ' + (data.error || 'Failed'), 'var(--danger)');
+          }
+        } catch(e) {
+          showStatus('✗ ' + e.message, 'var(--danger)');
+        }
+      }
+
+      function showStatus(msg, color) {
+        const el = document.getElementById('status');
+        el.textContent = msg;
+        el.style.color = color;
+      }
+
+      document.getElementById('new-dir').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addDir();
+      });
+    </script>
+    """)
+  end
+
+  def skill_detail(name, skill) do
+    layout(skill.name, """
+    <div class="detail-header">
+      <a href="/" class="back">&larr; Back</a>
+      <h1>#{escape(skill.name)}</h1>
+      <div class="actions">
+        <div class="meta-grid">
+          <span>Directory: <code>#{escape(skill.dir)}</code></span>
+          <span>Modified: #{format_time(skill.mtime)}</span>
+        </div>
+        <button onclick="copyRaw('skills', '#{escape(name)}')" class="btn-copy">📋 Copy</button>
+      </div>
+      #{if skill.description != "", do: "<p style='margin-top:.75rem;color:var(--text-soft);'>#{escape(skill.description)}</p>", else: ""}
+    </div>
+    <div class="markdown-body">
+      <pre style="white-space:pre-wrap;">#{escape(skill.content)}</pre>
+    </div>
+    """)
   end
 
   # ── Private helpers ──────────────────────────────────────────────
@@ -200,6 +330,33 @@ defmodule Beacon.Views do
     |> Enum.join("\n")
   end
 
+  defp render_skills_list([]) do
+    "<p class='empty'>No skills found. Add skill directories in the Config page.</p>"
+  end
+
+  defp render_skills_list(skills) do
+    skills
+    |> Enum.map(fn
+      {key, skill} ->
+        render_skill_row(key, skill)
+
+      %{key: key} = skill ->
+        render_skill_row(key, skill)
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp render_skill_row(key, skill) do
+    """
+    <div class="session-row">
+      <a href="/skill?name=#{url_encode(key)}" style="font-weight:600;">#{escape(skill.name)}</a>
+      <span class="cwd">#{escape(skill.dir)}</span>
+      <span class="mtime">#{format_time(skill.mtime)}</span>
+      <button onclick="copyRaw('skills', '#{escape(key)}')" class="btn-icon">📋</button>
+    </div>
+    """
+  end
+
   defp render_message_bubble(msg) do
     role = Map.get(msg, :role, "assistant")
     content = Map.get(msg, :content, "")
@@ -214,11 +371,27 @@ defmodule Beacon.Views do
   end
 
   defp format_time(nil), do: ""
+  defp format_time({{year, month, day}, {hour, minute, second}}) do
+    # Convert Erlang tuple to DateTime
+    case DateTime.new(Date.new!(year, month, day), Time.new!(hour, minute, second)) do
+      {:ok, dt} -> DateTime.to_string(dt)
+      _ -> ""
+    end
+  end
   defp format_time(%DateTime{} = dt) do
     dt
     |> DateTime.truncate(:second)
     |> DateTime.to_string()
   end
+
+  defp normalize_mtime(%DateTime{} = mtime), do: mtime
+
+  defp normalize_mtime({{year, month, day}, {hour, minute, second}}) do
+    {:ok, dt} = DateTime.new(Date.new!(year, month, day), Time.new!(hour, minute, second), "Etc/UTC")
+    dt
+  end
+
+  defp normalize_mtime(_), do: ~U[1970-01-01 00:00:00Z]
 
   defp escape(nil), do: ""
   defp escape(s) when is_binary(s) do
@@ -534,6 +707,7 @@ defmodule Beacon.Views do
 
         .uuid { color: var(--text-soft); font-size: .82rem; }
         .error { color: var(--danger); padding: 2rem; }
+        .config-section { margin-bottom: 2rem; }
       </style>
     </head>
     <body>
@@ -556,7 +730,7 @@ defmodule Beacon.Views do
         async function copyRaw(source, key) {
           const btn = event.target;
           try {
-            const r = await fetch('/api/raw/' + source + '/' + encodeURIComponent(key));
+            const r = await fetch('/api/raw/' + source + '?key=' + encodeURIComponent(key));
             const text = await r.text();
             if (navigator.clipboard?.writeText) {
               await navigator.clipboard.writeText(text);

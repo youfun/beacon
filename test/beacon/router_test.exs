@@ -5,7 +5,7 @@ defmodule Beacon.RouterTest do
   setup do
     case Process.whereis(Beacon.Store) do
       nil -> {:ok, _} = Beacon.Store.start_link([])
-      pid -> Agent.update(pid, fn _ -> %{plans: %{}, tasks: %{}, codex_sessions: %{}} end)
+      pid -> Agent.update(pid, fn _ -> %{plans: %{}, tasks: %{}, codex_sessions: %{}, skills: %{}} end)
     end
 
     :ok
@@ -15,6 +15,116 @@ defmodule Beacon.RouterTest do
     conn = conn(:get, "/") |> Beacon.Router.call([])
     assert conn.status == 200
     assert String.contains?(conn.resp_body, "Agent Dashboard")
+  end
+
+  test "GET / handles skills with tuple mtimes" do
+    Beacon.Store.put(:skills, "legacy-skill", %{
+      name: "Legacy Skill",
+      description: "tuple mtime",
+      content: "body",
+      dir: "/tmp",
+      mtime: {{2026, 3, 20}, {2, 6, 51}}
+    })
+
+    Beacon.Store.put(:skills, "new-skill", %{
+      name: "New Skill",
+      description: "datetime mtime",
+      content: "body",
+      dir: "/tmp",
+      mtime: ~U[2026-03-20 02:06:52Z]
+    })
+
+    conn = conn(:get, "/") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert String.contains?(conn.resp_body, "Legacy Skill")
+    assert String.contains?(conn.resp_body, "New Skill")
+  end
+
+  test "GET /config handles listed skills" do
+    Beacon.Store.put(:skills, "retro", %{
+      name: "retro",
+      description: "|",
+      content: "body",
+      raw: "---\nname: retro\n---\nbody",
+      dir: "/tmp/skills",
+      mtime: ~U[2026-03-20 02:06:51Z]
+    })
+
+    conn = conn(:get, "/config") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert String.contains?(conn.resp_body, "Current Skills")
+    assert String.contains?(conn.resp_body, "retro")
+    assert String.contains?(conn.resp_body, "copyRaw('skills', 'retro')")
+  end
+
+  test "GET /skill resolves keys containing slashes via query param" do
+    key = ".claude/skills::retro"
+
+    Beacon.Store.put(:skills, key, %{
+      name: "retro",
+      description: "|",
+      content: "skill body",
+      raw: "---\nname: retro\n---\nskill body",
+      dir: "/home/box/.claude/skills",
+      mtime: ~U[2026-03-20 02:06:51Z]
+    })
+
+    conn = conn(:get, "/skill?name=#{URI.encode_www_form(key)}") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert String.contains?(conn.resp_body, "skill body")
+    assert String.contains?(conn.resp_body, "retro")
+    assert String.contains?(conn.resp_body, "copyRaw('skills', '.claude/skills::retro')")
+  end
+
+  test "GET /skill query param is fetched before lookup" do
+    key = "skills/gstack::office-hours"
+
+    Beacon.Store.put(:skills, key, %{
+      name: "office-hours",
+      description: "desc",
+      content: "office body",
+      raw: "---\nname: office-hours\n---\noffice body",
+      dir: "/home/box/.claude/skills/gstack",
+      mtime: ~U[2026-03-20 02:06:51Z]
+    })
+
+    conn = conn(:get, "/skill?name=#{URI.encode_www_form(key)}") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert String.contains?(conn.resp_body, "office body")
+  end
+
+  test "GET /skill path form still works for keys containing slashes" do
+    key = "skills/gstack::setup-browser-cookies"
+
+    Beacon.Store.put(:skills, key, %{
+      name: "setup-browser-cookies",
+      description: "desc",
+      content: "setup body",
+      raw: "---\nname: setup-browser-cookies\n---\nsetup body",
+      dir: "/home/box/.claude/skills/gstack",
+      mtime: ~U[2026-03-20 02:06:51Z]
+    })
+
+    conn = conn(:get, "/skill/#{key}") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert String.contains?(conn.resp_body, "setup body")
+  end
+
+  test "GET /api/raw/skills returns skill raw content via query param" do
+    key = "skills/gstack::office-hours"
+
+    Beacon.Store.put(:skills, key, %{
+      name: "office-hours",
+      description: "desc",
+      content: "office body",
+      raw: "---\nname: office-hours\n---\noffice body",
+      dir: "/home/box/.claude/skills/gstack",
+      mtime: ~U[2026-03-20 02:06:51Z]
+    })
+
+    conn = conn(:get, "/api/raw/skills?key=#{URI.encode_www_form(key)}") |> Beacon.Router.call([])
+    assert conn.status == 200
+    assert conn.resp_body == "---\nname: office-hours\n---\noffice body"
   end
 
   test "GET /plan/:name returns rendered markdown" do
